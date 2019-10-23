@@ -15,7 +15,7 @@
 
 #include "RCD.h"
 
-extern void DebugM(const char * cmd);
+extern void DebugM(char * cmd);
 
 RCD::~RCD()
 {
@@ -52,12 +52,12 @@ bool RCD::test()
 		return false;
 }
 
-void RCD::attach(void(*fn)(int newStatus))
+void RCD::attach(void(*fn)(uint8_t newStatus))
 {
     callback = fn;
 }
 
-void RCD::cb(int newStatus)
+void RCD::cb(uint8_t newStatus)
 {
     if(callback == NULL) return;
     callback(newStatus);

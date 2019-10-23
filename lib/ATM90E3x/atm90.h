@@ -27,6 +27,7 @@ public:
     uint16_t ReadSPI(uint16_t addr);
     uint16_t WriteSPI(uint16_t addr, uint16_t val);
     
+    uint16_t getTotPower();
     uint16_t getMaxCurrent();
     uint16_t getAVGvolt();
 

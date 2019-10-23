@@ -28,18 +28,19 @@
 #define mVAL_min 5000 //abbassare dopo aver messo OPAMP?
 
 #define numAVG 10 //how many cycles before changing 
+#define numAVGerr1 100 //how many cycles before changing 
 
 class EVSE {
 public:
-    enum cst {cNULL, cERR, cNC, cReady, cCharge, cVent, cERRshort, cERRdiode, cERR1, cERR2, cERR3, cERRRCD};
-    const char* StatD[12] = {"cNULL", "cERR", "cNC", "cReady", "cCharge", "cVent", "cERRshort", "cERRdiode", "cERR1", "cERR2", "cERR3", "cERRRCD"} ;
+    enum cst {cNULL, cERR, cNC, cReady, cCharge, cVent, cERRshort, cERRdiode, cERR1, cERR2, cERR3, cERRRCD, cERRRLY};
+    const char* StatD[13] = {"cNULL", "cERR", "cNC", "cReady", "cCharge", "cVent", "cERRshort", "cERRdiode", "cERR1", "cERR2", "cERR3", "cERRRCD", "cERRRLY"} ;
 
-    char ID;
+    uint8_t ID;
     bool AutoStart = true;
 
     cst chg_status;
     
-    EVSE(PinName PWM_PIN, PinName Feedback_PIN, PinName Relay_PIN, char set_ID);
+    EVSE(PinName PWM_PIN, PinName Feedback_PIN, PinName Relay_PIN, PinName Sense1_PIN, PinName Sense2_PIN, uint8_t set_ID);
     ~EVSE();
     cst getStatus();
     char* getStatusStr();
@@ -52,8 +53,8 @@ public:
    
     uint32_t SessionStartEnergy = 0;
 
-    void attach(void(*fn)(char eID, cst NewStatus));
-    void attachAuth(char(*fn)(char eID));
+    void attach(void(*fn)(uint8_t eID, cst NewStatus));
+    void attachAuth(uint8_t(*fn)(uint8_t eID));
 
     void StartCharge();
 
@@ -65,6 +66,8 @@ private:
     InterruptIn *INTpin; //pp(PA_9);
     PwmOut      *OUTpin; //my_pwm(PA_9);
     DigitalOut  *RLYpin; 
+    DigitalIn   *SNS1pin; 
+    DigitalIn   *SNS2pin; 
 
     Ticker      *CheckPilot;
 
@@ -80,11 +83,14 @@ private:
 
     void StartCharging();
     void StopCharging();
-
-    char(*callbackAuth)(char eID);
+    
+    void ResetRelayErr();
+    bool CheckOutVoltage();
+    
+    uint8_t(*callbackAuth)(uint8_t eID);
     bool cbAuth();
 
-    void(*callback)(char eID, cst NewStatus);
+    void(*callback)(uint8_t eID, cst NewStatus);
     void cb(cst NewStatus);
     
     void setNewStatus(cst NewStatus);

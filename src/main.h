@@ -19,6 +19,7 @@
 #include "atm90.h" 
 #include "RCD.h" 
 #include "ctcomm.h" 
+#include "utils.h" 
 
 
 #define pin_rly1 PB_0
@@ -54,8 +55,8 @@
 #define pin_rcd_t PC_13
 
 #define fw_ver_major 0x00
-#define fw_ver_minor 0x02
-#define fw_ver_string "VER00.02"
+#define fw_ver_minor 0x03
+#define fw_ver_string "VER00.03"
 
 //TODO: add configuration check for single/dual
 #define num_ports 1
@@ -63,20 +64,20 @@
 const unsigned char  *idBase0 =  (unsigned char  *) (0x1FFFF7E8);
 const uint16_t *flashSize = (uint16_t *) (0x1FFFF7E0);
 
-extern void send_status(char ID);
-extern void ParseCmd(unsigned char * cmd, int len);
+extern void send_status(uint8_t ID);
+extern void ParseCmd(uint8_t * cmd, int len);
 extern void cmd_read_reg(uint16_t addr);
 extern void cmd_send_info();
-extern void send_status(char ID);
-extern void send_error(unsigned char err_code);
-extern void send_c_current(char ID);
+extern void send_status(uint8_t ID);
+extern void send_error(uint8_t err_code);
+extern void send_c_current(uint8_t ID);
 
 extern void do_test();
 
-extern void DebugM(const char * cmd);
+extern void DebugM(char * cmd);
 
-void get_port_info(char ID);
-void set_port_info(char ID);
+void get_port_info(uint8_t ID);
+void set_port_info(uint8_t ID);
 
 //Addresses in EEPROM
 #define EEPROM_START_ATMCONFIG 0x20

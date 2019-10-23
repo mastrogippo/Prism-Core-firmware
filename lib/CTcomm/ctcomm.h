@@ -39,7 +39,7 @@ public:
     void send_command(unsigned char * cmd, int len);
     //void send_test(char c); 
     
-    void dbg(const char * cmd);
+    void dbg(char * cmd);
 
 private:  
     Serial *pc;

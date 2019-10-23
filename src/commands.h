@@ -39,6 +39,7 @@
 #define err_portUnknown 0x02
 #define err_outOfRange  0x03
 #define err_wrongPass   0x04
+#define err_EEPROM      0x10 
 #define err_RCDtest     0x50
 #define err_RCDtrip     0x51
 

@@ -39,9 +39,12 @@ HAL_StatusTypeDef writeEEPROMWord(uint32_t address, uint32_t data);
 uint16_t readEEPROMHalfWord(uint32_t address);
 uint32_t readEEPROMWord(uint32_t address);
 
+bool EEPROM_CHECK(uint32_t addr);
 
 //Energy accumulator
 HAL_StatusTypeDef addUnit();
 uint32_t ReadEnergy();
+
+void EE_save_config(uint16_t * data, uint16_t len, uint16_t start);
 
 #endif

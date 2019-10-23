@@ -16,7 +16,7 @@
 #include "atm90.h"
 #include "eeprom_flash.h" 
 
-extern void DebugM(const char * cmd);
+extern void DebugM(char * cmd);
 
 ATM90::~ATM90()
 {
@@ -69,6 +69,12 @@ uint16_t ATM90::WriteSPI(uint16_t addr, uint16_t val)
     return res;
 }
 
+//Returns actual power in W
+uint16_t ATM90::getTotPower()
+{
+    return ReadSPI(0xB0)*4;
+}      
+
 //Returns the biggest current value of the 3 phases, in mA
 uint16_t ATM90::getMaxCurrent()
 {
@@ -91,16 +97,34 @@ uint16_t ATM90::getAVGvolt()
 
 void ATM90::save_config(uint32_t addr)
 {
-    DebugM("StartSave");
-    uint16_t flash_data[0x200]; //temporary save page
+    uint16_t flash_data[0x40];
+    uint16_t tmpAddr = 0;
+    uint16_t i;
+    flash_data[tmpAddr++] = 0x5678;
+    for(i = 0x31; i <= 0x3B; i++ )
+        flash_data[tmpAddr++] = ReadSPI(i);
+    flash_data[tmpAddr++] = 0x5678;
+    for(i = 0x41; i <= 0x4D; i++ )
+        flash_data[tmpAddr++] = ReadSPI(i);
+    flash_data[tmpAddr++] = 0x5678;
+    for(i = 0x51; i <= 0x57; i++ )
+        flash_data[tmpAddr++] = ReadSPI(i);
+    flash_data[tmpAddr++] = 0x5678;
+    for(i = 0x61; i <= 0x6F; i++ )
+        flash_data[tmpAddr++] = ReadSPI(i);
+    EE_save_config(flash_data, 0x40, 0x30);
 
-    int i;
+    /*
+    DebugM("StartSave");
+
+    uint16_t flash_data[0x200]; //temporary save page (0x400 byte)
+    uint16_t i;
     for(i = 0; i < 0x200; i++ )
     {
         flash_data[i] = *(__IO uint16_t*)(addr+(i*2));
     }
     
-    int tmpAddr = 0;
+    uint16_t tmpAddr = 0x30;
     flash_data[tmpAddr++] = 0x5678;
     for(i = 0x31; i <= 0x3B; i++ )
         flash_data[tmpAddr++] = ReadSPI(i);
@@ -114,11 +138,10 @@ void ATM90::save_config(uint32_t addr)
     for(i = 0x61; i <= 0x6F; i++ )
         flash_data[tmpAddr++] = ReadSPI(i);
 
-    DebugM("Write");
-
-    enableEEPROMWriting(addr);
     DebugM("EnableWrite");
+    enableEEPROMWriting(addr);
 
+    DebugM("Write");
     for(i = 0; i < 0x200; i++ )
     { 
         HAL_StatusTypeDef status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_HALFWORD, addr+(i*2),  flash_data[i]);
@@ -127,13 +150,13 @@ void ATM90::save_config(uint32_t addr)
     }
     
     disableEEPROMWriting();
-    DebugM("EndSave");
-
+    DebugM("EndSave");*/
 }
  
 void ATM90::load_config(uint32_t addr)
 {
     int i;
+    addr += 0x60;
     for(i = 0x30; i <= 0x3B; i++ )
     {
         WriteSPI(i, *(__IO uint16_t*)addr);

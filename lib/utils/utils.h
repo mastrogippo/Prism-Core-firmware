@@ -1,4 +1,4 @@
-// RCD interface library for Prism Core
+// Utilities for Prism Core
 // Copyright (C) 2019 Mastro Gippo
 //
 // This program is free software: you can redistribute it and/or modify it under
@@ -13,33 +13,19 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <http://www.gnu.org/licenses/>.
 
-#ifndef MBED_RCD_H
-#define MBED_RCD_H
+#ifndef MBED_UTILS_H
+#define MBED_UTILS_H
  
 #include "mbed.h"
 
-class RCD {
-public:
-    uint8_t Status = 0;
 
-    RCD(PinName pin_detect, PinName pin_test);
-    ~RCD();
-	
-	bool test();
-    void attach(void(*fn)(uint8_t newStatus));
-	
-private:  
+extern void DebugM(char * cmd);
+uint16_t bytes_to_u16(uint8_t * b);
+void U16_to_bytes(uint16_t u16, uint8_t * dest);
+uint32_t bytes_to_u32(uint8_t * b);
+void U32_to_bytes(uint32_t u32, uint8_t * dest);
+void BtoHexStr(uint32_t u32, uint8_t size, char * dest);
+void DbgHex(char * prefix, uint32_t u32, uint8_t size);
 
-	bool testing = false;
-	
-    DigitalOut  *ptest;
-    InterruptIn *pdetect;
-	
-	void pintH();
-	void pintL();
-	
-    void(*callback)(uint8_t newStatus);
-    void cb(uint8_t NewStatus);
-};
 
 #endif

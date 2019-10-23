@@ -102,7 +102,7 @@ void CTCOMM::serial_interrupt() {
     }
 }
 
-void CTCOMM::dbg(const char * cmd)
+void CTCOMM::dbg(char * cmd)
 {
   // Calculate CRC
   char crc = _xt_start;

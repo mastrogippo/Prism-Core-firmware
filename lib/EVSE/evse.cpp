@@ -15,6 +15,7 @@
 
 #include "evse.h"
 #include "eeprom_flash.h" 
+#include "utils.h"
 
 //NOTE! Modify line 106 of ..\framework-mbed\targets\TARGET_STM\TARGET_STM32F1\analogin_api.canalog_api.c
 //This is to increase ADC sampling time to allow ADC cap charging due to high input impedance
@@ -23,6 +24,8 @@
 ////
 //DigitalOut ph(PB_12);
 //Serial pc(PA_9, PA_10,115200);
+
+//Timeout checkRelay;
 
 void EVSE::SetCurrentLimit(uint16_t c)
 {
@@ -45,7 +48,7 @@ void EVSE::LoadCurrentLimit()
     CurrentLimit = 320;
 }
 
-void EVSE::attachAuth(char(*fn)(char eID))
+void EVSE::attachAuth(uint8_t(*fn)(uint8_t eID))
 {
     callbackAuth = fn;
 }
@@ -63,7 +66,7 @@ bool EVSE::cbAuth()
         return false;
 }
 
-void EVSE::attach(void(*fn)(char eID, cst NewStatus))
+void EVSE::attach(void(*fn)(uint8_t eID, cst NewStatus))
 {
     callback = fn;
 }
@@ -78,10 +81,7 @@ EVSE::cst EVSE::getStatus()
 {
     return chg_status;
 }
-/*char* EVSE::getStatusStr()
-{
-    return StatD[chg_status];
-}*/
+
 void EVSE::set_commanded_current_pwm()
 {
     float tmp = OUTpin->read();
@@ -126,6 +126,7 @@ void EVSE::set_commanded_current(int16_t current_dA)
 void EVSE::RCDstop()
 {
     //TODO: check
+    DebugM("RCDstop");
     StopCharging();
     setNewStatus(cERRRCD);
 }
@@ -136,15 +137,66 @@ void EVSE::RCDreset()
         setNewStatus(cNC);
 }
 
+void EVSE::ResetRelayErr()
+{
+    DebugM("ResetRelayErr");
+    if(chg_status == cERRRLY)
+    {
+        RLYpin->write(0);
+        //WARNING: wait_ms(200) breaks the CPU :(
+        wait(0.02);
+        if(CheckOutVoltage())
+        {
+            //TODO: send error
+            DebugM("Still error...");
+            //check again after 2 seconds
+            //checkRelay.attach(this, &EVSE::ResetRelayErr, 2);
+        }
+        else
+        {
+            DebugM("Error clear...");
+            setNewStatus(cNC);
+        }
+    }
+}
+
+bool EVSE::CheckOutVoltage()
+{
+    //TODO: CHECK
+    //Check for at least a complete 50hz cycle
+    for(uint8_t i = 0; i < 21; i++)
+    {
+        if(!SNS1pin->read() || !SNS2pin->read())
+        {
+            //DebugM("VOLTAGE ON PINS!!");
+            return true;
+        }
+        wait(0.001);
+    }
+    //DebugM("no voltage on pins");
+    return false;
+}
+
 void EVSE::StartCharging()
 {
     //TODO: add checks and stuff?
-    SessionStartEnergy = ReadEnergy();
-    RLYpin->write(1);
+    if(CheckOutVoltage())
+    {
+        //TODO: send error
+        setNewStatus(cERRRLY);
+        StopCharging();
+        DebugM("ERRORE START!");
+    }
+    else
+    {
+        SessionStartEnergy = ReadEnergy();
+        RLYpin->write(1);
+    }
 }
 
 void EVSE::StopCharging()
 {
+    DebugM("STOPc");
     //TODO: add checks and stuff?
     //SessionStartEnergy = ReadEnergy();
     RLYpin->write(0);
@@ -161,14 +213,19 @@ void EVSE::StartCharge()
 void EVSE::setNewStatus(cst NewStatus)
 {
     float tmp = OUTpin->read();
-    chg_status = NewStatus;
     
-    if(chg_status != cCharge)
+    if((chg_status != NewStatus) && (NewStatus != cCharge))
+    {
+        DbgHex("oldStat=",chg_status,2);
+        DbgHex("newStat=",NewStatus,2);
         StopCharging();
+    }
+    chg_status = NewStatus;
 
     switch(chg_status)
     {
         case cReady:
+            DebugM("cReady");
             set_commanded_current_pwm();
             StopCharging();
             break;
@@ -177,6 +234,7 @@ void EVSE::setNewStatus(cst NewStatus)
             if(AutoStart)
                 StartCharging();
             break;
+        case cERRRLY:
         case cERRRCD:
         case cNC:
             if(tmp != 1)
@@ -205,7 +263,8 @@ void EVSE::ChangeStatus(cst NewStatus)
             if(chg_status == cNC) //lower delay
                 cntCstatus = 5;
         }
-        if(cntCstatus++ > numAVG)
+        //TODO: check longer delays for ERR3 and ERR1?
+        if(cntCstatus++ > (((NewStatus==cERR1)||(NewStatus==cERR3))?numAVGerr1:numAVG))
         {//received the request for more than [numAVG] times, changing status
             tmp_st = cNULL;
             cntCstatus = 0;
@@ -216,6 +275,14 @@ void EVSE::ChangeStatus(cst NewStatus)
 
 void EVSE::CheckPilotIdle()
 {
+    //CheckOutVoltage();
+    if(chg_status == cERRRLY)
+    {
+        //do nothing until RLY error is cleared
+        ResetRelayErr();
+        return;
+    }
+
     if(chg_status == cERRRCD)
     {
         //do nothing until RCD error is cleared
@@ -241,7 +308,7 @@ void EVSE::CheckPilotIdle()
 }
 void EVSE::pintH()
 {
-    wait_us(20);
+    wait_us(25);
     //ph=1;
     gh = FBpin->read_u16();
     //ph=0;
@@ -249,7 +316,7 @@ void EVSE::pintH()
 }
 void EVSE::pintL()
 {
-    wait_us(20);
+    wait_us(25);
     //ph=1;
     gl = FBpin->read_u16();
 
@@ -300,14 +367,18 @@ EVSE::~EVSE()
     delete CheckPilot;
 }
 
-EVSE::EVSE(PinName PWM_PIN, PinName Feedback_PIN, PinName Relay_PIN, char set_ID)
+EVSE::EVSE(PinName PWM_PIN, PinName Feedback_PIN, PinName Relay_PIN, PinName Sense1_PIN, PinName Sense2_PIN, uint8_t set_ID)
 {
     FBpin = new AnalogIn(Feedback_PIN);
     INTpin = new InterruptIn(PWM_PIN);
     OUTpin = new PwmOut(PWM_PIN);
     RLYpin = new DigitalOut(Relay_PIN);
+    SNS1pin = new DigitalIn(Sense1_PIN);
+    SNS2pin = new DigitalIn(Sense2_PIN);
 
     StopCharging();
+
+    SessionStartEnergy = ReadEnergy();
 
     CheckPilot = new Ticker();
     // Set PWM

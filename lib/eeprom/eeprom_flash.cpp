@@ -15,6 +15,13 @@
 
 #include "mbed.h"
 #include "eeprom_flash.h"
+#include "utils.h"
+
+//EEPROM structure: (NOTE: all address are 16bit wide! to get actual address, double it.)
+//126-127 accumulator for energy counter
+//128:
+//0x00-0x2E  generic config
+//0x30-0x62  ATM90 config
 
 void _FLASH_PageErase(uint32_t PageAddress)
 {
@@ -75,6 +82,17 @@ uint32_t readEEPROMWord(uint32_t address) {
 }
 
 
+bool EEPROM_CHECK(uint32_t addr)
+{
+    //only check first byte 
+    //TODO: implement later maybe
+    uint16_t tmp = *(__IO uint16_t*)(addr+0x60);
+    //first byte should be 0x5678
+    if(tmp != 0x5678)
+        return false;
+    else
+        return true;    
+}
 
 
 uint32_t ReadEnergy()
@@ -199,4 +217,46 @@ HAL_StatusTypeDef addUnit()
     }
 
     HAL_FLASH_Lock();
+}
+
+//overwrite config with data byte, from start
+void EE_save_config(uint16_t * data, uint16_t len, uint16_t start)
+{
+    //TODO: test and implement
+    uint32_t addr = EEPROM_START_ADDRESS;
+    if((start+len) > (EEPROM_SIZE/2))
+    {
+       DebugM("Error: EE overflow"); 
+       return;
+    }
+    DebugM("StartSave");
+
+    //temporary save page (0x400 byte)
+    uint16_t flash_data[0x200]; 
+    uint16_t i;
+    for(i = 0; i < 0x200; i++ )
+    {
+        flash_data[i] = *(__IO uint16_t*)(addr+(i*2));
+    }
+
+    //overwrite bytes
+    for(i = 0; i < len; i++ )
+    {
+        flash_data[i+start] = data[i];
+    }
+
+    DebugM("Write");
+    __disable_irq();
+
+    enableEEPROMWriting(addr);
+    for(i = 0; i < 0x200; i++ )
+    { 
+        HAL_StatusTypeDef status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_HALFWORD, addr+(i*2),  flash_data[i]);
+        //TODO: check result
+        //writeEEPROMHalfWord(i*2, flash_data[i]);
+    }
+    disableEEPROMWriting();
+
+    __enable_irq();
+    DebugM("EndSave");
 }

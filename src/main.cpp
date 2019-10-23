@@ -24,6 +24,7 @@ CTCOMM com(pin_u_tx, pin_u_rx, 115200);
 EVSE* evse[num_ports];
 RCD rcd(pin_rcd, pin_rcd_t);
 
+uint8_t devERROR = 0;
 //EVSE evse2(pin_pilot_d, pin_pilot_r);
 
 //Serial pc(pin_u_tx, pin_u_rx,115200);
@@ -45,6 +46,8 @@ unsigned char tmp[TX_BUF_LENGTH];
 Ticker do1s;
 void everySecond()
 {
+    static uint16_t cnt = 0;
+    
     //TODO:TESTARE!!!!
     static uint32_t tmpTotActEnCnt = 0;  
     uint16_t enRead = pwrIC.ReadSPI(0x90); //Sum Active Energy
@@ -55,6 +58,19 @@ void everySecond()
         addUnit();
         tmpTotActEnCnt -= 320;
     }
+
+    //TODO: multiple interfaces
+    //send update if charging
+    if((evse[0]->getStatus() == EVSE::cCharge) || (evse[0]->getStatus() == EVSE::cVent))
+    {
+        send_status(0);
+    }
+
+    if(cnt++ > 120) //send update every 2 minutes
+    {
+        cnt = 0;
+        send_status(0);
+    }  
 }
 
 Ticker flipper;
@@ -63,7 +79,7 @@ void flip() {
    // rly = !rly;
 }
 
-void EVSE_changed(char ID, EVSE::cst NewStatus)
+void EVSE_changed(uint8_t ID, EVSE::cst NewStatus)
 {
     send_status(ID);
     /*if(NewStatus == EVSE::cCharge)
@@ -72,18 +88,19 @@ void EVSE_changed(char ID, EVSE::cst NewStatus)
         rly1 = 0;*/
 }
 
-char EVSE_Auth(char ID)
+uint8_t EVSE_Auth(uint8_t ID)
 {
     //TODO: do something to authorize charge start
     DebugM("Auth OK");
     return 0x55;
 }
 
-void RCD_cb(int newStatus)
+void RCD_cb(uint8_t newStatus)
 {
     //TODO: add multiple evse support
     if(newStatus == 1)
     {
+        devERROR = devERROR | err_RCDtrip;
         evse[0]->RCDstop();
         send_error(err_RCDtrip);
     }
@@ -105,14 +122,16 @@ int main()
     //Activate and Test RCD
     while(!rcd.test())
     {    
-        DebugM("RCD test ERROR");
+        devERROR = devERROR | err_RCDtest;
         send_error(err_RCDtest);
+        DebugM("RCD test ERROR");
         wait(5);
     }
+    devERROR = devERROR & (~err_RCDtest);
     DebugM("RCD test OK!");
     rcd.attach(&RCD_cb);
     
-    evse[0] = new EVSE(pin_pilot_d, pin_pilot_r, pin_rly2, 0);
+    evse[0] = new EVSE(pin_pilot_d, pin_pilot_r, pin_rly2, pin_hv_pres1, pin_hv_pres2, 0);
     evse[0]->attach(EVSE_changed);
     evse[0]->attachAuth(EVSE_Auth);
     //evse[1] = &evse1;
@@ -120,14 +139,21 @@ int main()
     DebugM("EE check");
     
     //TODO: Check EEPROM data validity
-    if(false)//EEPROM_CHECK()
+    if(EEPROM_CHECK(EEPROM_START_ADDRESS))
     {
         pwrIC.load_config(EEPROM_START_ADDRESS);
     }
     else
     {
-        //TODO: Throw error
+        devERROR = devERROR | err_EEPROM;
+        send_error(err_EEPROM);
+        DebugM("NO CAL DATA!");
     }
+    
+    //TODO: multiple sides
+    send_status(0);
+
+    DebugM("Startup OK");
     
     //wait(1);
     while(1) {
@@ -136,49 +162,19 @@ int main()
     }
 }
 
-
-
-void DebugM(const char * cmd)
+void DebugM(char * cmd)
 {
     com.dbg(cmd);
 }
 
-
-static unsigned char cmd_buff[RX_BUF_LENGTH+2];
-static volatile unsigned char cmd_len = 0;
-
-uint16_t bytes_to_u16(unsigned char * b)
-{
-    uint16_t tmp = b[0];
-    return (tmp << 8) + b[1];
-}
-void U16_to_bytes(uint16_t u16, unsigned char * dest)
-{
-    dest[0] = (unsigned char)(u16 >> 8);
-    dest[1] = (unsigned char)(u16);
-}
-
-uint32_t bytes_to_u32(unsigned char * b)
-{
-    uint32_t tmp = b[0];
-    tmp += (tmp << 8) + (uint32_t)b[1];
-    tmp += (tmp << 8) + (uint32_t)b[2];
-    tmp += (tmp << 8) + (uint32_t)b[3];
-    return tmp;
-}
-void U32_to_bytes(uint32_t u32, unsigned char * dest)
-{
-    dest[0] = (unsigned char)(u32 >> 24);
-    dest[1] = (unsigned char)(u32 >> 16);
-    dest[2] = (unsigned char)(u32 >> 8);
-    dest[3] = (unsigned char)(u32);
-}
+static uint8_t cmd_buff[RX_BUF_LENGTH+2];
+static volatile uint8_t cmd_len = 0;
 
 void StoreCmd(unsigned char * cmd, int len) 
 {
     if(cmd_len == 0) //se ho un comando in coda, ignoro e droppo. implementare coda?
     {
-        for(int i = 0; i < len; i++)
+        for(uint8_t i = 0; i < len; i++)
         {
             cmd_buff[i] = cmd[i + 1];
         }
@@ -240,12 +236,12 @@ void ParseCmd()
         case c_atm_read_all:
         {
             uint16_t reg = 0;
-            for(int i = 0; i < 32; i++)
+            for(uint8_t i = 0; i < 32; i++)
             {
                 tmp[0] = c_atm_reg_multi;
                 U16_to_bytes(reg, &tmp[1]);
                 tmp[3] = 8;
-                for(int j = 0; j < 8; j++)
+                for(uint8_t j = 0; j < 8; j++)
                 {
                     t = pwrIC.ReadSPI(reg);
                     U16_to_bytes(t, &tmp[(j*2) + 4]);
@@ -331,13 +327,12 @@ void do_test()
             pwrIC.load_config(EEPROM_START_ADDRESS);
         break;
         case 0x77:
-            DebugM("Call");
             pwrIC.save_config(EEPROM_START_ADDRESS);
         break;
     }
 }
 
-void send_error(unsigned char err_code)
+void send_error(uint8_t err_code)
 {
     tmp[0] = c_error;
     tmp[1] = err_code;
@@ -356,7 +351,7 @@ void cmd_send_info()
 {
     //TODO: implement
     //byte1: versione major,byte2: versione minor, byte3-4: fw checksum,  byte5-16: CPUID, byte17: ports#
-    int len = 0;
+    uint8_t len = 0;
     tmp[len++] = c_info;
     tmp[len++] = fw_ver_major;
     tmp[len++] = fw_ver_minor;
@@ -366,7 +361,7 @@ void cmd_send_info()
     tmp[len++] = 0xAA;
 
     //CPUID
-    for(int i = 0; i < 12; i++)
+    for(uint8_t i = 0; i < 12; i++)
     {
         tmp[len++] = idBase0[i]; 
     }
@@ -376,10 +371,10 @@ void cmd_send_info()
     com.send_command(tmp, len);
 }
 
-void send_status(char ID)
+void send_status(uint8_t ID)
 {
     //TODO: implement
-    int len = 0;
+    uint8_t len = 0;
     //byte1: ID lato, byte2: flags, byte3-4:corrente richiesta/10[SIG], 
     //byte 5-6 corrente attuale/10[SIG], byte 7-8 tensione attuale/10[SIG], byte9-10 Potenza attuale/10[SIG]
     tmp[len++] = c_status;
@@ -404,56 +399,60 @@ void send_status(char ID)
         case EVSE::cCharge:
         case EVSE::cVent:
             tmp[len] = cs_charging + cs_car_connected;
-        break;   
+        break; 
+        default:
+            //TODO: ???
+        break;  
     }
     len++;
 
     U16_to_bytes((uint16_t)(evse[ID]->commanded_current), &tmp[len]);
     len += 2;
 
+    //TODO: Separate values for different interfaces
     U16_to_bytes((uint16_t)(pwrIC.getMaxCurrent()/100), &tmp[len]);
     len += 2;
 
     U16_to_bytes((uint16_t)(pwrIC.getAVGvolt()/10), &tmp[len]);
     len += 2;
 
-    //TODO: find this value in ATM90 when it's calibrated 
-    tmp[len++] = 0x01; //(byte)(evse[ID].read_power>>8);
-    tmp[len++] = 0x67; //3590W (3593.5W) //(byte)(evse[ID].read_power);
+    //TODO: don't do it /10?
+    U16_to_bytes((uint16_t)(pwrIC.getTotPower()/10), &tmp[len]);
+    len += 2;
 
     //Total energy
-    //TODO: Separate counters for different interfaces
     uint32_t TotEnergy = ReadEnergy();
     U32_to_bytes((uint32_t)(TotEnergy), &tmp[len]);
     len += 4;
+
+    //Session energy
     U32_to_bytes((uint32_t)(TotEnergy - evse[ID]->SessionStartEnergy), &tmp[len]);
     len += 4;
-
 
     com.send_command(tmp, len);
 }
 
-void send_c_current(char ID)
+void send_c_current(uint8_t ID)
 {
     tmp[0] = c_current;
     tmp[1] = ID;
-    U16_to_bytes((uint16_t)(evse[cmd_buff[1]]->commanded_current), &tmp[2]);
+    U16_to_bytes((uint16_t)(evse[ID]->commanded_current), &tmp[2]);
 
     com.send_command(tmp, 4);
 }
 
-void get_port_info(char ID)
+void get_port_info(uint8_t ID)
 {
     //byte1: ID lato, byte2: flags, byte3-4: corrente massima
     tmp[0] = c_port_info;
     tmp[1] = ID;
     tmp[2] = 0x55;
-    U16_to_bytes((uint16_t)(evse[cmd_buff[1]]->GetCurrentLimit()), &tmp[3]);
+    U16_to_bytes((uint16_t)(evse[ID]->GetCurrentLimit()), &tmp[3]);
 
     com.send_command(tmp, 5);
 }
 
-void set_port_info(char ID)
+void set_port_info(uint8_t ID)
 {
     //TODO: This sets only one side current; find a way to
     //set the current limit of the whole system 
@@ -470,174 +469,3 @@ void set_port_info(char ID)
 
     get_port_info(ID);
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-/*
-unsigned char smg[50];
-int count = 0;
-int num;
-char tc;
-bool flagser_getend;
-
-void Wr(uint8_t * buf, int len)
-{
-    for(int i = 0; i < len; i++)
-    {
-        while(!pc.writable());
-        pc.putc(buf[i]);
-        wait(0.001);
-    }
-}
-
-void ParseAnswer()
-{
-    if(smg[1] == 'R')
-    {
-
-        while(!pc.writable());
-        pc.putc(0x69);
-        while(!pc.writable());
-        pc.putc(0x69);
-        while(!pc.writable());
-        pc.putc(smg[2]);
-        while(!pc.writable());
-        pc.putc(smg[3]);
-        
-        uint16_t tmp;
-        for(uint16_t i = smg[2]; i <= smg[3]; i++)
-        {
-            tmp = pwrIC.ReadSPI(i);
-            while(!pc.writable());
-            pc.putc((uint8_t)(tmp));
-            while(!pc.writable());
-            pc.putc((uint8_t)(tmp >> 8));
-        }
-    }
-    else if(smg[1] == 'W')
-    {
-        uint16_t Addr = smg[2];
-        Addr = Addr<<8;
-        Addr += smg[3];
-        uint16_t Val = smg[4];
-        Val = Val<<8;
-        Val += smg[5];
-        pwrIC.WriteSPI(Addr, Val);
-    }
-    else if(smg[1] == 'S')
-    {
-        if(smg[2] == 1)
-        {
-            if(smg[3] == 0)
-                rly1 = 1;
-            else
-                rly1 = 0;
-        }
-        else if(smg[2] == 2)
-        {
-            if(smg[3] == 0)
-                rly2 = 1;
-            else
-                rly2 = 0;
-        }
-    }
-}
-
-void SerInt() {
-    unsigned char temp;
-    static unsigned char max;
-    while(pc.readable())
-    {
-        temp = pc.getc();
-        if(count == 0)
-        {
-            if(temp == 0x69) //start
-                smg[count++] = temp;
-        }
-        else if(count == 1)
-        {
-            smg[count++] = temp;
-            if(temp == 'R')
-                max = 4;
-            else if(temp == 'W')
-                max = 6;
-            else if(temp == 'S')
-                max = 4;
-        }        
-        else// if(count <= 3) //get address
-        { 
-            smg[count++] = temp;
-            if(count >= max)
-            {
-                ParseAnswer();
-                count = 0;
-            }            
-        }
-    }
-}
-
-void SerialStart(void) {
-    pc.baud(115200);
-    //pc.baud(921600);
-    flagser_getend = 0;
-    pc.attach(&SerInt,Serial::RxIrq);
-    count = 0;
-}
- 
-int main() {
-        rly1 = 1;
-        rly2 = 1;
-    pc.printf("Start\n");
-    SerialStart();
-    pc.printf("1\n");
-
-    while(1) {
-        led1 = 1;
-        wait(0.2);
-        led1 = 0;
-        wait(0.2);
-    }
-}
-/*
-int main()
-{
-    
-    
-    while (1) {
-        printf("%d \n", evse1.getStatus());
-        //if(chg_status == cERR)
-           wait(0.5);
-
-           wait(2);
-           rly1 = 1;
-           wait(2);
-           rly2 = 1;
-           wait(2);
-           rly1 = 0;
-           wait(2);
-           rly2 = 0;
-           wait(2);
-           
-        
-    }
-}
-*/
